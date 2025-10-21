@@ -11,6 +11,21 @@ demandCols <- c('Assignment.Tier1DirectIndirect','Job.Discipline','Level','FLSA.
           'Assignment.Org7','Assignment.Org8')
 rollingMonths<-3
 roundingThreshold<-.7
+# Hardcoded Scope values
+tier1_choices <- c(
+  "Overall",
+  "Space Engineering and Technology - Direct",
+  "Space Operations - Direct",
+  "Space Strategic & Missile Defense Systems - Direct",
+  "Space Finance and Business Operations - Direct",
+  "Space Safety & Quality Assurance - Direct",
+  "Space Enterprise Performance - Direct",
+  "Space Security Services - Direct",
+  "Space Operations - Indirect",
+  "Space Ignite - Direct",
+  "Space National Security Space - Direct"
+)
+
 
 assignments <- read.csv('data//Space & RMS Assignments_20250916.csv') %>%
   filter(Assignment.Status %in% c('Firm','High Potential') & Resource.Type!='Placeholder') %>%

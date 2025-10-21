@@ -44,7 +44,7 @@ tier1_choices <- c(
 # UI
 # -----------------------------
 ui <- fluidPage(
-  titlePanel("Interactive Parameters for Demand/Supply Pipeline"),
+  titlePanel("Supply-Based Models"),
   sidebarLayout(
     sidebarPanel(
       h4("Position Fields"),

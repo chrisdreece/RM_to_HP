@@ -1,0 +1,7 @@
+{
+  "id": "model_20251021T224146",
+  "timestamp": "2025-10-21T22:41:46Z",
+  "rollingMonths": 3,
+  "roundingThreshold": 0.7,
+  "position_cols": ["Tier1.Direct.Indirect", "Job.Discipline", "Level", "FLSA.Status", "Leader.or.IC", "Title", "Business.Unit", "Department", "MSA", "Country", "Skill.Domain"]
+}

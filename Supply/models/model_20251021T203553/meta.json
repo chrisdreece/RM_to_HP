@@ -1,0 +1,9 @@
+{
+  "id": "model_20251021T203553",
+  "timestamp": "2025-10-21T20:35:53Z",
+  "adjustedSupply": 0,
+  "rollingMonths": 3,
+  "roundingThreshold": 0.7,
+  "scope": "Space Strategic & Missile Defense Systems - Direct",
+  "position_fields": ["People.NodeID", "Business.Area.Descr", "EmployeeContractor", "Tier1.Direct.Indirect", "Job.Discipline", "Level", "FLSA.Status", "Leader.or.IC", "Business.Unit", "MSA", "Country", "Skill.Domain"]
+}
