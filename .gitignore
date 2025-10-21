@@ -5,9 +5,6 @@
 /data/
 data/
 .Rproj.user
-/Supply/data/**
-!/Supply/
-/Demand/data/**
-!/Demand/
-/Hybrid/data/**
-!/Hybrid/
+/Supply/data/
+/Demand/data/
+/Hybrid/data/
