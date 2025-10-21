@@ -2,7 +2,8 @@ library(dplyr)
 library(tidyr)
 library(lubridate)
 library(stringr)
-
+library(slider)
+library(gdata)
 
 #### NEED TO SHARE RULES FOR HOW LEVEL IS COMPUTED NUMERICALLY
 #### NOTE 'REPRESENTED', etc are considered LEVEL 0 -- maybe this isn't right because
@@ -10,138 +11,189 @@ library(stringr)
 
 
 ### NOTE THAT WE FILTER OUT ROWS WHERE PEOPLE NODE ID = 'data mismatch' or 'executive placeholder'
+skillDomain<-read.csv('data//skillDomain.csv') %>%
+  rename('People.NodeID'='People.Node.ID')
 employees <- read.csv('data//2025-09-16 Employees Space_RMS.csv') %>%
-  filter(!(PeopleNodeID) %in% c('Data Mismatch','Exec Placeholder')) %>%
-  mutate(People.NodeID=as.integer(PeopleNodeID))
+  filter(!(PeopleNodeID) %in% c('Tier1 Placeholder Folder')) %>%
+  mutate(People.NodeID=as.integer(PeopleNodeID)) %>%
+  left_join(.,skillDomain,by='People.NodeID') %>%
+  mutate(Skill.Domain=ifelse(is.na(Skill.Domain),'Not Specified',Skill.Domain)) %>%
+  filter(Business.Area.Descr=='Space')
+rm(skillDomain)
 
-reqs <- read.csv('data//2025-09-16 Requisitions Space_RMS.csv')
+reqs <- read.csv('data//2025-09-16 Requisitions Space_RMS.csv') %>%
+  filter(Business.Area.Descr=='Space')
 assignments <- read.csv('data//Space & RMS Assignments_20250916.csv') %>%
-  filter(Assignment.Status %in% c('Firm','High Potential')) %>%
-  mutate(LevelNum=ifelse(substr(Level,1,1)=='L',as.numeric(substr(Level,7,7)),0)) 
+  filter(Assignment.Status %in% c('Firm','High Potential') & Resource.Type!='Placeholder') %>%
+  filter(Assignment.Org2=='Space')
 
-month_cols <- grep("^([A-Z][a-z]{2}\\.[0-9]{2})$", names(assignments), value = TRUE)
+month_cols <- grep("^X[0-9]{1,2}\\.[0-9]{1,2}\\.[0-9]{2}$", names(assignments), value = TRUE)
 ### which employeeIDs are at least 75% allocated in assignments??
+
 assignments <- assignments %>%
   filter(Resource.Type %in% c('Contractor','Employee','Requisition')) %>%
   group_by(People.NodeID,Resource.Type) %>%
-  summarise(maxLevel=max(LevelNum),across(all_of(month_cols), ~ sum(.x, na.rm = TRUE), .names = "{.col}")) %>%
-  ungroup()
-
+  summarise(Level.Group = dplyr::first(Level.Group[!is.na(Level.Group)]),
+            across(all_of(month_cols), ~ sum(.x, na.rm = TRUE), .names = "{.col}")) %>%
+  ungroup() 
+  
 assignments <- assignments %>%
   pivot_longer(
-    cols = -c(People.NodeID, Resource.Type,maxLevel),
+    cols = -c(People.NodeID, Resource.Type, Level.Group),
     names_to = "Date",
     values_to = "Metric"
   ) %>%
-  # Convert "Jan.25" → "2025-01-01" etc.
   mutate(
-    # Remove any trailing periods and handle both month and year
-    Date = str_replace_all(Date, "\\.", " "),
-    # Parse as a date (assumes year is 20xx)
-    Date = my(Date),                 # lubridate::my parses month-year
-    Date = ceiling_date(Date, "month") - days(1)  # optional: make it end-of-month
+    # Turn "X9.1.25" -> "2025-09-01"
+    Date = str_replace(Date, "^X(\\d{1,2})\\.(\\d{1,2})\\.(\\d{2})$", "20\\3-\\1-\\2"),
+    Date = lubridate::ymd(Date),
+    Date = lubridate::ceiling_date(Date, "month") - lubridate::days(1)
   ) %>%
   arrange(People.NodeID, Date) %>%
-  filter(Date>='2025-09-30')
+  filter(Date <= as.Date("2027-03-31"))
 
-# params you can tweak
-under_thresh <- 0.9
-min_consec   <- 8
 
-assignments <- assignments %>%
-  arrange(People.NodeID, Date) %>%
-  group_by(People.NodeID) %>%
-  # mark under-allocation and build run IDs of TRUE/FALSE streaks
-  mutate(
-    under = Metric < under_thresh,
-    run_id_all = dplyr::consecutive_id(under),
-    run_id = if_else(under, run_id_all, NA_integer_)
-  ) %>%
-  ungroup() %>%
-  # find any under-allocation run(s) with length >= min_consec
-  group_by(People.NodeID, run_id) %>%
-  summarise(
-    is_under_run = all(!is.na(run_id)),
-    run_len = dplyr::n(),
-    start_date = dplyr::first(Date),
-    .groups = "drop"
-  ) %>%
-  filter(is_under_run, run_len >= min_consec) %>%
-  group_by(People.NodeID) %>%
-  summarise(elim_start = min(start_date), .groups = "drop") %>%
-  # join back and create a carry-forward elimination flag
-  right_join(assignments, by = "People.NodeID") %>%
-  arrange(People.NodeID, Date) %>%
-  group_by(People.NodeID) %>%
-  mutate(
-    EliminationFlag = if_else(!is.na(elim_start) & Date >= elim_start, 1L, 0L)
-  ) %>%
-  ungroup()
-
-### remove underallocations
-assignments <- assignments %>%
-  filter(EliminationFlag!=1) %>%
-  select(-c('EliminationFlag','elim_start'))
-
-### 
-cols<-c('People.NodeID','Level')
-
-table(employees$Workforce.Type)
+cols <- c('People.NodeID','Business.Area.Descr','Tier1.Direct.Indirect','Job.Discipline','Level','FLSA.Status','Leader.or.IC',
+          'Title','Business.Unit','Department','MSA','Country','Skill.Domain','EmployeeContractor')
 
 employees <- employees %>%
-  mutate(Source=ifelse(Workforce.Type %in% c('Casual Employee','Full Time Employee','Part Time Employee'),'emp','cont')) %>%
-  select(cols,Source)
+  mutate(Source='HRMS') %>%
+  mutate(EmployeeContractor=ifelse(Workforce.Type %in% c('Contractor','Independent Contractor','Leased Labor'),'Contractor','Employee')) %>%
+  select(all_of(cols),Source)
 
 reqs <- reqs %>%
-  select(cols) %>%
-  mutate(Source='req')
-emp_reqs <- rbind(employees,reqs) %>%
-  mutate(LevelNum=ifelse(substr(Level,1,1)=='L',as.numeric(substr(Level,7,7)),0)) 
+  mutate(EmployeeContractor=ifelse(Workforce.Type %in% c('Contractor','Independent Contractor','Leased Labor'),'Contractor','Employee'),
+         Skill.Domain='Not Applicable') %>%
+  mutate(Source='Reqs') %>%
+  select(cols,Source)
+
+emp_reqs <- rbind(employees,reqs)
   
 ### combined
 dates<-data.frame(IntervalDate=unique(assignments$Date))
 
 demand <- emp_reqs %>%
   cross_join(dates) %>%
-  left_join(assignments, by = c("People.NodeID","IntervalDate" = "Date")) %>%
-  group_by(People.NodeID) %>%
+  left_join(assignments, by = c("People.NodeID", "IntervalDate" = "Date")) %>%
+  mutate(Metric = coalesce(Metric, 0)) %>%
+  group_by(IntervalDate,Source,across(all_of(setdiff(cols, "People.NodeID")))) %>%
+  summarise(Headcount=length(People.NodeID),Metric = sum(Metric, na.rm = TRUE), .groups = "drop") %>%
+  arrange()
+
+### some quick checks:
+# zzz <- demand %>%
+#   group_by(IntervalDate) %>%
+#   summarise(Headcount=sum(Headcount),Metric=sum(Metric)) %>%
+#   ungroup()
+# zzz2 <- assignments %>%
+#   group_by(Date) %>%
+#   summarise(Metric=sum(Metric)) %>%
+#   ungroup()
+# zzz3 <- assignments %>%
+#   filter(!(People.NodeID %in% unique(emp_reqs$People.NodeID))) %>%
+#   group_by(Date) %>%
+#   summarise(Metric=sum(Metric)) %>%
+#   ungroup()
+
+### replace position fields with positionkey mapping, set mapping aside
+  # 1) Define which columns define the "position"
+position_fields <- setdiff(names(demand), c("IntervalDate","Metric"))
+  # 2) Make a deterministic lookup (stable across runs)
+positionKeyMapping <- demand %>%
+  distinct(across(all_of(position_fields))) %>%          # unique combos
+  arrange(across(all_of(position_fields))) %>%           # make ordering deterministic
+  mutate(PositionKey = row_number())                     # assign integer key
+demand <- demand %>%
+  left_join(.,positionKeyMapping, by = position_fields) %>%
+  arrange(PositionKey,IntervalDate) %>%
+  select(PositionKey,IntervalDate,Tier1=Tier1.Direct.Indirect,Source,EmployeeContractor,Headcount,Metric)
+
+### take rolling average of allocation, then use as the basis for reductions
+rollingMonths<-3
+roundingThreshold<-.7
+demand <- demand %>%
+  group_by(PositionKey) %>%
   arrange(IntervalDate, .by_group = TRUE) %>%
   mutate(
-    Reduction = as.integer(is.na(Metric))
+    RollingAvg = slide_dbl(
+      Metric,
+      ~ mean(.x, na.rm = TRUE),       # define how to handle NAs
+      .before = 0,                    # include current row
+      .after  = rollingMonths - 1,    # look forward N-1 rows
+      .complete = FALSE               # allow partial windows at the end
+    )
   ) %>%
-  # remove rows after the first Reduction == 1
-  filter(cumsum(Reduction) <= 1) %>%
-  ungroup() %>%
-  select(-Metric) %>%
-  mutate(maxLevel=ifelse(is.na(maxLevel),0,maxLevel)) %>%
-  mutate(EmpOverResourced=ifelse(LevelNum>maxLevel & Reduction!=1 & Source=='emp',1,0),
-         ContractorOverResourced=ifelse(LevelNum>maxLevel & Reduction!=1 & Source=='cont',1,0),
-         ReqOverResourced=ifelse(LevelNum>maxLevel & Reduction!=1 & Source=='req',1,0)) %>%
-  mutate(empReduction=ifelse(Source=='emp' & Reduction==1,1,0),
-         contractorReduction=ifelse(Source=='cont' & Reduction==1,1,0),
-         reqReduction=ifelse(Source=='req' & Reduction==1,1,0))
-
-demandSummary <- demand %>%
-  group_by(IntervalDate) %>%
-  summarise(Headcount=length(People.NodeID),
-            EmpReductions=sum(empReduction),ContractorReductions=sum(contractorReduction),ReqReductions=sum(reqReduction),
-            EmpOverResourced=sum(EmpOverResourced),ReqOverResourced=sum(ReqOverResourced)) %>%
+  mutate(
+    Demand = if_else(
+      RollingAvg - floor(RollingAvg) >= roundingThreshold,
+      ceiling(RollingAvg),
+      floor(RollingAvg)
+    )
+  ) %>%
+  ungroup() 
+  
+### create transactions
+demand <- demand %>%
+  group_by(PositionKey) %>%
+  arrange(IntervalDate, .by_group = TRUE) %>%
+  mutate(
+    # hires(+)/seps(-) needed this month
+    Transaction = if_else(
+      row_number() == 1,
+      Demand - Headcount,          # first month: reconcile from starting Headcount
+      Demand - lag(Demand)         # thereafter: change vs. prior month's Demand
+    ),
+    # JUST A QA: Headcount after applying transactions sequentially
+    AdjHeadcount = Headcount + cumsum(Transaction)
+  ) %>%
   ungroup()
 
-### remove underallocated reqs
-table(assignments$Resource.Type)
+# 1) Compute StartHeadcount per PositionKey (prior month's AdjHeadcount; first row uses Headcount)
+demand <- demand %>%
+  group_by(PositionKey) %>%
+  arrange(IntervalDate, .by_group = TRUE) %>%
+  mutate(StartHeadcount = if_else(row_number() == 1, Headcount, lag(AdjHeadcount))) %>%
+  ungroup()
+
+# 2) Simple monthly rollup with starting/ending + category nets
+summary_by_date_simple <- demand %>%
+  group_by(IntervalDate) %>%
+  summarise(
+    StartingHeadcount       = sum(StartHeadcount, na.rm = TRUE),
+    EndingHeadcount         = sum(AdjHeadcount,   na.rm = TRUE),
+    Transactions            = sum(Transaction,    na.rm = TRUE),
+    ReqTransactions         = sum(if_else(Source == "Reqs", Transaction, 0), na.rm = TRUE),
+    EmployeeTransactions    = sum(if_else(Source == "HRMS" & EmployeeContractor == "Employee",  Transaction, 0), na.rm = TRUE),
+    ContractorTransactions  = sum(if_else(Source == "HRMS" & EmployeeContractor == "Contractor", Transaction, 0), na.rm = TRUE),
+    .groups = "drop"
+  )
 
 
+keep(summary_by_date_simple,sure=TRUE)
 
-### where are we losing demand because an assignment is not allocated?
-  ### are there Employees in assignments who don't show up in active? 
-  ### only 1:
-missingEmps <- assignments %>%
-  filter(!(EmployeeID %in% unique(employees$EmployeeID)))
+########### ADD IN UNMET DEMAND
+assignments <- read.csv('data//Space & RMS Assignments_20250916.csv') %>%
+  filter(Assignment.Status %in% c('Firm','High Potential') & Resource.Type!='Placeholder') %>%
+  filter(Assignment.Org2=='Space')
+month_cols <- grep("^X[0-9]{1,2}\\.[0-9]{1,2}\\.[0-9]{2}$", names(assignments), value = TRUE)
+### which employeeIDs are at least 75% allocated in assignments??
+assignments <- assignments %>%
+  filter(Resource.Type %in% c('Not Allocated')) %>%
+  group_by(Assignment.Org4) %>%
+  summarise(across(all_of(month_cols), ~ sum(.x, na.rm = TRUE), .names = "{.col}")) %>%
+  ungroup()
 
-  ### how about the assignments that haven't been allocated?
-
-
-
-
-
+assignments <- assignments %>%
+  pivot_longer(
+    cols = -c(Assignment.Org4),
+    names_to = "Date",
+    values_to = "Metric"
+  ) %>%
+  mutate(
+    # Turn "X9.1.25" -> "2025-09-01"
+    Date = str_replace(Date, "^X(\\d{1,2})\\.(\\d{1,2})\\.(\\d{2})$", "20\\3-\\1-\\2"),
+    Date = lubridate::ymd(Date),
+    Date = lubridate::ceiling_date(Date, "month") - lubridate::days(1)
+  ) %>%
+  arrange(Assignment.Org4, Date) %>%
+  filter(Date <= as.Date("2027-03-31"))
