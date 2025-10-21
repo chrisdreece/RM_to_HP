@@ -1,0 +1,9 @@
+{
+  "id": "model_20251021T194853",
+  "timestamp": "2025-10-21T19:48:53Z",
+  "adjustedSupply": 0,
+  "rollingMonths": 3,
+  "roundingThreshold": 0.7,
+  "scope": "Overall",
+  "position_fields": ["People.NodeID", "Business.Area.Descr", "EmployeeContractor", "Tier1.Direct.Indirect", "Level", "Leader.or.IC", "Title", "Business.Unit", "Department", "MSA", "Country", "Skill.Domain"]
+}

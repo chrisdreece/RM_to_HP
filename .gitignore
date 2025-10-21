@@ -4,3 +4,7 @@
 # Data
 /data/
 data/
+.Rproj.user
+Supply/data/
+Demand/data/
+Hybrid/data/
